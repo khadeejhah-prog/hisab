@@ -15,6 +15,7 @@ Reply ONLY with a JSON object, no markdown:
   "kind": "price" | "bnpl" | "contract" | "exchange" | "message" | "car" | "property" | "receipt" | "menu" | "other" | "unclear",
   "title": "what it is, under 8 words, e.g. 'Air Force 1 trainers' or 'Tenancy contract'",
   "amount_aed": number or null,
+  "estimated": true | false,   // true when no price was visible and amount_aed is your estimate of the usual UAE price
   "verdict": "ok" | "think" | "trap" | "danger",
   "simple": "ONE plain sentence a 12-year-old understands. The single most useful thing. Under 25 words.",
   "plain": ["up to 3 short, jargon-free bullets, under 16 words each"],
@@ -35,9 +36,10 @@ Rules:
 - Track "kid": title + amount + kid_line + simple + cheaper + discount_tip + talk. No scam/contract jargon. Verdict "danger" only for scams.
 - Level 1: simple only. Level 2: simple + plain + better_option. Level 3: add points.
 - Who "remit": for exchange boards compute what the family receives in the home currency at a sensible rate and show the fee as %.
-- Unclear or not about money: kind "unclear", say so kindly, suggest what to point at.
+- NO PRICE VISIBLE but you can tell what the thing is (a product, food, drink, toy, gadget, clothing, a service, a ticket): still fill title and ESTIMATE its usual UAE retail price in amount_aed, set "estimated": true, and say in "simple" that it is a typical price since no tag was in view. Never return null amount_aed for a recognisable item.
+- Use kind "unclear" ONLY when you cannot tell what is in the photo, or it is not something anyone buys (a wall, a pet, a face). Say so kindly and suggest what to point at.
 - Language: write in the user's language code (en, ar, hi, ur, tl, ne). Western digits.
-- Be honest: lower confidence rather than invent a price. Prices in "cheaper" are estimates and the app says so.
+- Be honest: when the price is on the tag, use it exactly; when it is not, estimate and mark "estimated": true with lower confidence. Prices in "cheaper" are estimates and the app says so.
 - Tone: a smart friend. No lecturing, no shame, no selling.`;
 
 module.exports = async (req, res) => {
@@ -54,22 +56,35 @@ module.exports = async (req, res) => {
   if (image.length > 6_000_000) return res.status(413).json({ error: "Image too large. Resize under 1600px." });
 
   const payload = {
-    model: MODEL, max_tokens: 900, system: SYSTEM,
+    model: MODEL, max_tokens: 1600, system: SYSTEM,
     messages: [{ role: "user", content: [
       { type: "image", source: { type: "base64", media_type, data: image } },
       { type: "text", text: `Profile: ${JSON.stringify(profile)}\nUser note: ${note || "(none)"}\nReply with the JSON object only.` }
     ]}]
   };
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify(payload) });
-    const data = await r.json();
-    if (!r.ok) return res.status(502).json({ error: data.error?.message || "AI request failed" });
-    const text = (data.content || []).map(c => c.text || "").join("").trim();
-    const json = extractJSON(text);
-    if (!json) return res.status(502).json({ error: "Could not read the AI's answer", raw: text.slice(0, 300) });
+    const json = await callAI(key, payload);
     json.model = MODEL;
     return res.status(200).json(json);
-  } catch (e) { return res.status(500).json({ error: "Server error", detail: String(e) }); }
+  } catch (e) { return res.status(502).json({ error: String(e.message || e), raw: e.raw }); }
 };
-function extractJSON(t){ try{return JSON.parse(t)}catch{} const m=t.match(/\{[\s\S]*\}/); if(m){try{return JSON.parse(m[0])}catch{}} return null; }
+
+// Robust JSON reader: strips code fences, finds the first {...}, and repairs a reply that was cut off.
+function extractJSON(t){ if(!t) return null; t=String(t).trim().replace(/^```(?:json)?/i,"").replace(/```$/,"").trim(); if(!t.startsWith("{")) { const i=t.indexOf("{"); if(i<0) return null; t=t.slice(i); }
+  try{return JSON.parse(t)}catch{}
+  const m=t.match(/\{[\s\S]*\}/); if(m){try{return JSON.parse(m[0])}catch{}}
+  for(let i=t.indexOf("{",1);i>0&&i<t.length;i=t.indexOf("{",i+1)){ const mm=t.slice(i).match(/\{[\s\S]*\}/); if(mm){try{return JSON.parse(mm[0])}catch{}} }
+  // repair: drop a dangling partial value, then close open strings/arrays/objects
+  let s=t; for(let cut=0;cut<6;cut++){ let q=false,esc=false,st=[]; for(const ch of s){ if(esc){esc=false;continue} if(ch==="\\"&&q){esc=true;continue} if(ch==='"'){q=!q;continue} if(q)continue; if(ch==="{"||ch==="[")st.push(ch); else if(ch==="}"||ch==="]")st.pop(); }
+    let fix=s+(q?'"':""); while(st.length){fix+=st.pop()==="{"?"}":"]"} fix=fix.replace(/,\s*([}\]])/g,"$1");
+    try{return JSON.parse(fix)}catch{} const k=Math.max(s.lastIndexOf(","),s.lastIndexOf("{"),s.lastIndexOf("[")); if(k<=0)break; s=s.slice(0,k); }
+  return null; }
+async function callAI(key, payload){ // one call, one retry if the model did not return data
+  const go=async(p)=>{ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01"},body:JSON.stringify(p)}); const data=await r.json().catch(()=>({})); if(!r.ok) throw new Error(data.error?.message||("AI request failed ("+r.status+")")); const text=(data.content||[]).map(c=>c.text||"").join(""); let t=text.trim().replace(/^```(?:json)?\s*/i,"").replace(/```\s*$/,"").trim(); if(!t.startsWith("{")) t="{"+t; return {text:t, stop:data.stop_reason}; };
+  const p={...payload, messages:[...payload.messages,{role:"assistant",content:"{"}]}; // prefill: the answer must start as JSON
+  let a=await go(p); let j=extractJSON(a.text); if(j) return j;
+  const p2={...p, messages:[...payload.messages,{role:"user",content:"Reply again with ONLY the JSON object. No words before or after it."},{role:"assistant",content:"{"}]};
+  a=await go(p2); j=extractJSON(a.text); if(j) return j;
+  const why=a.stop==="max_tokens"?"the AI reply was cut off":"the AI replied in words, not data"; const e=new Error("Could not read the AI's answer ("+why+")"); e.raw=a.text.slice(0,300); throw e;
+}
+module.exports.__robust = { extractJSON, callAI };

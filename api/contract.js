@@ -16,11 +16,8 @@ module.exports = async (req, res) => {
   const content = images.slice(0, 4).map(d => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: d } }));
   content.push({ type: "text", text: `Profile: ${JSON.stringify(body.profile || {})}\nReply with the JSON object only.` });
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: MODEL, max_tokens: 1100, system: SYSTEM, messages: [{ role: "user", content }] }) });
-    const data = await r.json(); if (!r.ok) return res.status(502).json({ error: data.error?.message || "AI request failed" });
-    const text = (data.content || []).map(c => c.text || "").join(""); const json = extractJSON(text);
-    if (!json) return res.status(502).json({ error: "Could not read the AI's answer" });
+    const json = await callAI(key, { model: MODEL, max_tokens: 1800, system: SYSTEM, messages: [{ role: "user", content }] });
     return res.status(200).json(json);
-  } catch (e) { return res.status(500).json({ error: "Server error", detail: String(e) }); }
+  } catch (e) { return res.status(502).json({ error: String(e.message || e) }); }
 };
-function extractJSON(t){ try{return JSON.parse(t)}catch{} const m=t.match(/\{[\s\S]*\}/); if(m){try{return JSON.parse(m[0])}catch{}} return null; }
+const { extractJSON, callAI } = require("./lens.js").__robust;

@@ -19,14 +19,10 @@ module.exports = async (req, res) => {
 Reply ONLY with JSON: {"verdict":"ok"|"risky"|"scam","title":"short label under 6 words","rows":[{"k":"check name","v":"finding","s":"ok"|"warn"|"bad"}],"say":"2-3 plain sentences: what this is and what to do","report":true|false}
 Rules: Government fines, visas and police never arrive as SMS payment links; official UAE government domains end in .gov.ae. "Guaranteed" returns, "limited slots", urgency, crypto/forex bots, licences claimed with no number = unlicensed investment scam. Shops with no address, Instagram-only contact, bank-transfer-only payment, brand-new domains = risky. Established UAE retailers and .gov.ae domains with normal content are ok. Never name or recommend a bank, card, loan or investment product. Include rows for: domain age, official/government domain, HTTPS, licence/registration signals, pressure or scam language, contact/address, payment method (when known). Be honest about what you could not verify.`;
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 700, system: SYSTEM, messages: [{ role: "user", content: `URL: ${url}\nFacts: ${JSON.stringify({ host: checks.host, https: checks.https, is_gov_ae: checks.gov, registered: checks.registered, age_days: checks.ageDays, reachable: checks.reachable, title: checks.title })}\nPage text (may be empty): ${checks.text}\nReply with the JSON object only.` }] }) });
-    const data = await r.json(); if (!r.ok) return res.status(502).json({ error: data.error?.message || "AI request failed" });
-    const text = (data.content || []).map(c => c.text || "").join(""); const json = extractJSON(text);
-    if (!json) return res.status(502).json({ error: "Could not read the AI's answer" });
+    const json = await callAI(key, { model: MODEL, max_tokens: 1200, system: SYSTEM, messages: [{ role: "user", content: `URL: ${url}\nFacts: ${JSON.stringify({ host: checks.host, https: checks.https, is_gov_ae: checks.gov, registered: checks.registered, age_days: checks.ageDays, reachable: checks.reachable, title: checks.title })}\nPage text (may be empty): ${checks.text}\nReply with the JSON object only.` }] });
     json.checks = { host: checks.host, ageDays: checks.ageDays, https: checks.https, reachable: checks.reachable };
     return res.status(200).json(json);
-  } catch (e) { return res.status(500).json({ error: "Server error", detail: String(e) }); }
+  } catch (e) { return res.status(502).json({ error: String(e.message || e) }); }
 };
 async function fetchT(u, ms, opt = {}) { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms); try { return await fetch(u, { ...opt, signal: c.signal, redirect: "follow" }); } finally { clearTimeout(t); } }
-function extractJSON(t){ try{return JSON.parse(t)}catch{} const m=t.match(/\{[\s\S]*\}/); if(m){try{return JSON.parse(m[0])}catch{}} return null; }
+const { extractJSON, callAI } = require("./lens.js").__robust;
