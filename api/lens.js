@@ -56,7 +56,7 @@ module.exports = async (req, res) => {
   if (image.length > 6_000_000) return res.status(413).json({ error: "Image too large. Resize under 1600px." });
 
   const payload = {
-    model: MODEL, max_tokens: 1600, system: SYSTEM,
+    model: MODEL, max_tokens: 1200, system: SYSTEM,
     messages: [{ role: "user", content: [
       { type: "image", source: { type: "base64", media_type, data: image } },
       { type: "text", text: `Profile: ${JSON.stringify(profile)}\nUser note: ${note || "(none)"}\nReply with the JSON object only.` }
@@ -80,10 +80,9 @@ function extractJSON(t){ if(!t) return null; t=String(t).trim().replace(/^```(?:
     try{return JSON.parse(fix)}catch{} const k=Math.max(s.lastIndexOf(","),s.lastIndexOf("{"),s.lastIndexOf("[")); if(k<=0)break; s=s.slice(0,k); }
   return null; }
 async function callAI(key, payload){ // one call, one retry if the model did not return data
-  const go=async(p)=>{ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01"},body:JSON.stringify(p)}); const data=await r.json().catch(()=>({})); if(!r.ok) throw new Error(data.error?.message||("AI request failed ("+r.status+")")); const text=(data.content||[]).map(c=>c.text||"").join(""); let t=text.trim().replace(/^```(?:json)?\s*/i,"").replace(/```\s*$/,"").trim(); if(!t.startsWith("{")) t="{"+t; return {text:t, stop:data.stop_reason}; };
-  const p={...payload, messages:[...payload.messages,{role:"assistant",content:"{"}]}; // prefill: the answer must start as JSON
-  let a=await go(p); let j=extractJSON(a.text); if(j) return j;
-  const p2={...p, messages:[...payload.messages,{role:"user",content:"Reply again with ONLY the JSON object. No words before or after it."},{role:"assistant",content:"{"}]};
+  const go=async(p)=>{ const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01"},body:JSON.stringify(p)}); const data=await r.json().catch(()=>({})); if(!r.ok) throw new Error(data.error?.message||("AI request failed ("+r.status+")")); const text=(data.content||[]).map(c=>c.text||"").join(""); let t=text.trim().replace(/^```(?:json)?\s*/i,"").replace(/```\s*$/,"").trim(); return {text:t, stop:data.stop_reason}; };
+  let a=await go(payload); let j=extractJSON(a.text); if(j) return j;
+  const p2={...payload, messages:[...payload.messages,{role:"assistant",content:a.text.slice(0,2000)},{role:"user",content:"That was not valid JSON. Reply again with ONLY the JSON object, starting with { and ending with }. No words before or after it."}]};
   a=await go(p2); j=extractJSON(a.text); if(j) return j;
   const why=a.stop==="max_tokens"?"the AI reply was cut off":"the AI replied in words, not data"; const e=new Error("Could not read the AI's answer ("+why+")"); e.raw=a.text.slice(0,300); throw e;
 }
