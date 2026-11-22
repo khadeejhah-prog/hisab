@@ -29,6 +29,9 @@ Reply ONLY with a JSON object, no markdown:
   "confidence": 0-1
 }
 
+UAE PRICE BACKGROUND (typical 2026 retail ranges in AED; anchors for when no tag is visible — pick the point in the range that fits the brand, size and shop you can see; a visible tag always wins and then "estimated" is false):
+${require("./prices.js").text()}
+
 Rules:
 - UAE context: 4-cheque rent, RERA rent index, DLD 4% fee, Salik, DEWA, gratuity (21 days of BASIC per year for first 5 years, 30 after), BNPL late fees, exchange-house fees and rate spreads, committee (chit) schemes, unlicensed investment offers, "Dubai Police fine" SMS phishing, job contracts with low basic salary, employer paying flights.
 - NEVER name or recommend a bank, card, loan, investment, crypto or betting product. Say "a licensed transfer app" or "a licensed provider". Retail stores (Noon, Amazon.ae, Carrefour, Namshi) are fine to name.

@@ -10,7 +10,7 @@ module.exports = async (req, res) => {
       const d = await r.json().catch(() => ({})); const text = (d.content || []).map(c => c.text || "").join("");
       return { status: r.status, ms: Date.now() - t0, error: r.ok ? undefined : (d.error?.message || "failed"), type: d.error?.type, text: text.slice(0, 200), stop: d.stop_reason };
     } catch (e) { return { status: 0, ms: Date.now() - t0, error: String(e) }; } };
-  out.textCall = await call("Reply with exactly: {\"ok\":true}", 20);
+  out.textCall = await call("Reply with exactly: {\"ok\":true}", 60);
   out.textParsed = !!extractJSON(out.textCall.text || "");
   out.visionCall = await call([{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: PX } }, { type: "text", text: "Reply with exactly: {\"seen\":true}" }], 20);
   out.ok = out.textCall.status === 200 && out.visionCall.status === 200;
